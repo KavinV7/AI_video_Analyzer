@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Video Editor</title>
+    <!-- Use CDN for styling since we can't install new packages -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+        .card {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .step {
+            margin-bottom: 30px;
+        }
+        .frames-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .frame-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: white;
+        }
+        .frame-card img {
+            width: 100%;
+            height: auto;
+        }
+        .frame-content {
+            padding: 15px;
+        }
+        .slider-container {
+            margin: 20px 0;
+        }
+        .slider-values {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,.3);
+            border-radius: 50%;
+            border-top-color: #000;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .video-container {
+            margin: 20px 0;
+        }
+        .video-container video {
+            width: 100%;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header>
+            <h1>AI-Powered Video Editor</h1>
+        </header>
+
+        <div class="step" id="step1">
+            <article class="card">
+                <h3>Step 1: Upload Video</h3>
+                <p>Select a video file to upload</p>
+                <input type="file" id="videoFile" accept="video/*">
+                <div class="video-container hidden" id="videoPreview">
+                    <video id="videoPlayer" controls></video>
+                </div>
+                <div class="actions">
+                    <button id="uploadBtn">Upload Video</button>
+                    <span id="uploadLoading" class="loading hidden"></span>
+                </div>
+            </article>
+        </div>
+
+        <div class="step hidden" id="step2">
+            <article class="card">
+                <h3>Step 2: Extract Frames</h3>
+                <p>Extract frames from your video for analysis</p>
+                <div class="actions">
+                    <button id="extractFramesBtn">Extract Frames</button>
+                    <span id="extractLoading" class="loading hidden"></span>
+                </div>
+            </article>
+        </div>
+
+        <div class="step hidden" id="step3">
+            <article class="card">
+                <h3>Step 3: Analyze Frames</h3>
+                <div class="actions">
+                    <button id="analyzeAllFramesBtn">Analyze All Frames</button>
+                    <span id="analyzeLoading" class="loading hidden"></span>
+                </div>
+                <div class="frames-grid" id="framesContainer">
+                    <!-- Frames will be added here dynamically -->
+                </div>
+            </article>
+        </div>
+
+        <div class="step hidden" id="step4">
+            <article class="card">
+                <h3>Step 4: Trim Video</h3>
+                <p>Select start and end points to trim your video</p>
+                <div class="slider-container">
+                    <input type="range" min="0" max="100" value="0" class="slider" id="startSlider">
+                    <input type="range" min="0" max="100" value="100" class="slider" id="endSlider">
+                    <div class="slider-values">
+                        <span id="startValue">0:00</span>
+                        <span id="endValue">0:00</span>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button id="trimVideoBtn">Trim Video</button>
+                    <span id="trimLoading" class="loading hidden"></span>
+                </div>
+            </article>
+        </div>
+
+        <div class="step hidden" id="step5">
+            <article class="card">
+                <h3>Final Result</h3>
+                <div class="video-container">
+                    <video id="trimmedVideoPlayer" controls></video>
+                </div>
+                <div class="actions">
+                    <a id="downloadBtn" href="#" class="button" download>Download Trimmed Video</a>
+                </div>
+            </article>
+        </div>
+    </main>
+
+    <script>
+        // Global variables
+        let videoData = null;
+        let framesData = [];
+        let videoDuration = 0;
+        let frameDescriptions = {};
+
+        // Helper function to format time
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSecs = Math.floor(seconds % 60);
+            return `${minutes}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
+        }
+
+        // Initialize elements
+        document.addEventListener('DOMContentLoaded', function() {
+            // Step 1: Video Upload
+            const videoFileInput = document.getElementById('videoFile');
+            const videoPlayer = document.getElementById('videoPlayer');
+            const videoPreview = document.getElementById('videoPreview');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadLoading = document.getElementById('uploadLoading');
+
+            // Step 2: Extract Frames
+            const extractFramesBtn = document.getElementById('extractFramesBtn');
+            const extractLoading = document.getElementById('extractLoading');
+
+            // Step 3: Analyze Frames
+            const analyzeAllFramesBtn = document.getElementById('analyzeAllFramesBtn');
+            const analyzeLoading = document.getElementById('analyzeLoading');
+            const framesContainer = document.getElementById('framesContainer');
+
+            // Step 4: Trim Video
+            const startSlider = document.getElementById('startSlider');
+            const endSlider = document.getElementById('endSlider');
+            const startValue = document.getElementById('startValue');
+            const endValue = document.getElementById('endValue');
+            const trimVideoBtn = document.getElementById('trimVideoBtn');
+            const trimLoading = document.getElementById('trimLoading');
+
+            // Step 5: Final Result
+            const trimmedVideoPlayer = document.getElementById('trimmedVideoPlayer');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            // Video file selected
+            videoFileInput.addEventListener('change', function(e) {
+                if (e.target.files && e.target.files[0]) {
+                    const file = e.target.files[0];
+                    const fileURL = URL.createObjectURL(file);
+                    videoPlayer.src = fileURL;
+                    videoPreview.classList.remove('hidden');
+                }
+            });
+
+            // Video metadata loaded
+            videoPlayer.addEventListener('loadedmetadata', function() {
+                videoDuration = videoPlayer.duration;
+                startSlider.max = videoDuration;
+                endSlider.max = videoDuration;
+                endSlider.value = videoDuration;
+                startValue.textContent = formatTime(0);
+                endValue.textContent = formatTime(videoDuration);
+            });
+
+            // Upload video
+            uploadBtn.addEventListener('click', async function() {
+                if (!videoFileInput.files || !videoFileInput.files[0]) {
+                    alert('Please select a video file first');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('video', videoFileInput.files[0]);
+
+                uploadBtn.disabled = true;
+                uploadLoading.classList.remove('hidden');
+
+                try {
+                    const response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        videoData = data.video;
+                        document.getElementById('step1').classList.add('hidden');
+                        document.getElementById('step2').classList.remove('hidden');
+                    } else {
+                        alert('Upload failed: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Error uploading video:', error);
+                    alert('Upload failed. Please try again.');
+                } finally {
+                    uploadBtn.disabled = false;
+                    uploadLoading.classList.add('hidden');
+                }
+            });
+
+            // Extract frames
+            extractFramesBtn.addEventListener('click', async function() {
+                if (!videoData) {
+                    alert('Please upload a video first');
+                    return;
+                }
+
+                extractFramesBtn.disabled = true;
+                extractLoading.classList.remove('hidden');
+
+                try {
+                    const response = await fetch('/api/extract-frames', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ videoPath: videoData.path })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        framesData = data.frames;
+                        videoDuration = data.videoInfo.duration;
+                        
+                        // Update sliders with actual duration
+                        startSlider.max = videoDuration;
+                        endSlider.max = videoDuration;
+                        endSlider.value = videoDuration;
+                        startValue.textContent = formatTime(0);
+                        endValue.textContent = formatTime(videoDuration);
+                        
+                        // Create frame thumbnails
+                        framesContainer.innerHTML = '';
+                        framesData.forEach((frame, index) => {
+                            const frameCard = document.createElement('div');
+                            frameCard.className = 'frame-card';
+                            frameCard.innerHTML = `
+                                <img src="${frame.url}" alt="Frame ${index + 1}">
+                                <div class="frame-content">
+                                    <div class="frame-description" id="desc-${index}">
+                                        <button class="analyze-btn" data-index="${index}">Analyze Frame</button>
+                                    </div>
+                                </div>
+                            `;
+                            framesContainer.appendChild(frameCard);
+                        });
+
+                        // Add event listeners to analyze buttons
+                        document.querySelectorAll('.analyze-btn').forEach(btn => {
+                            btn.addEventListener('click', async function() {
+                                const index = parseInt(this.getAttribute('data-index'));
+                                const frame = framesData[index];
+                                await analyzeFrame(frame, index);
+                            });
+                        });
+
+                        document.getElementById('step2').classList.add('hidden');
+                        document.getElementById('step3').classList.remove('hidden');
+                    } else {
+                        alert('Frame extraction failed: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Error extracting frames:', error);
+                    alert('Frame extraction failed. Please try again.');
+                } finally {
+                    extractFramesBtn.disabled = false;
+                    extractLoading.classList.add('hidden');
+                }
+            });
+
+            // Analyze a single frame
+            async function analyzeFrame(frame, index) {
+                const descElement = document.getElementById(`desc-${index}`);
+                descElement.innerHTML = '<span class="loading"></span>';
+
+                try {
+                    const response = await fetch('/api/analyze-frame', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ framePath: frame.path })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        frameDescriptions[frame.path] = data.description;
+                        descElement.textContent = data.description;
+                    } else {
+                        descElement.textContent = 'Analysis failed';
+                    }
+                } catch (error) {
+                    console.error('Error analyzing frame:', error);
+                    descElement.textContent = 'Analysis failed';
+                }
+            }
+
+            // Analyze all frames
+            analyzeAllFramesBtn.addEventListener('click', async function() {
+                if (framesData.length === 0) {
+                    alert('Please extract frames first');
+                    return;
+                }
+
+                analyzeAllFramesBtn.disabled = true;
+                analyzeLoading.classList.remove('hidden');
+
+                try {
+                    for (let i = 0; i < framesData.length; i++) {
+                        await analyzeFrame(framesData[i], i);
+                    }
+                    document.getElementById('step3').classList.add('hidden');
+                    document.getElementById('step4').classList.remove('hidden');
+                } catch (error) {
+                    console.error('Error analyzing all frames:', error);
+                    alert('Analysis failed. Please try again.');
+                } finally {
+                    analyzeAllFramesBtn.disabled = false;
+                    analyzeLoading.classList.add('hidden');
+                }
+            });
+
+            // Update slider values
+            startSlider.addEventListener('input', function() {
+                if (parseFloat(startSlider.value) > parseFloat(endSlider.value)) {
+                    startSlider.value = endSlider.value;
+                }
+                startValue.textContent = formatTime(startSlider.value);
+            });
+
+            endSlider.addEventListener('input', function() {
+                if (parseFloat(endSlider.value) < parseFloat(startSlider.value)) {
+                    endSlider.value = startSlider.value;
+                }
+                endValue.textContent = formatTime(endSlider.value);
+            });
+
+            // Trim video
+            trimVideoBtn.addEventListener('click', async function() {
+                if (!videoData) {
+                    alert('Please upload a video first');
+                    return;
+                }
+
+                trimVideoBtn.disabled = true;
+                trimLoading.classList.remove('hidden');
+
+                try {
+                    const response = await fetch('/api/trim-video', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            videoPath: videoData.path,
+                            startTime: parseFloat(startSlider.value),
+                            endTime: parseFloat(endSlider.value)
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        trimmedVideoPlayer.src = data.video.url;
+                        downloadBtn.href = data.video.url;
+                        document.getElementById('step4').classList.add('hidden');
+                        document.getElementById('step5').classList.remove('hidden');
+                    } else {
+                        alert('Video trimming failed: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Error trimming video:', error);
+                    alert('Video trimming failed. Please try again.');
+                } finally {
+                    trimVideoBtn.disabled = false;
+                    trimLoading.classList.add('hidden');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
